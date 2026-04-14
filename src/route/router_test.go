@@ -274,8 +274,8 @@ func TestGetSupportedAssetsPublic(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected supports array, got %T", data["supports"])
 	}
-	if len(supports) < 6 {
-		t.Fatalf("expected >= 6 network supports, got %d", len(supports))
+	if len(supports) < 2 {
+		t.Fatalf("expected >= 2 network supports, got %d", len(supports))
 	}
 
 	seen := map[string]bool{}
@@ -284,7 +284,7 @@ func TestGetSupportedAssetsPublic(t *testing.T) {
 		network := row["network"].(string)
 		seen[network] = true
 	}
-	for _, n := range []string{"tron", "solana", "eth", "bsc", "polygon", "plasma"} {
+	for _, n := range []string{"tron", "solana"} {
 		if !seen[n] {
 			t.Fatalf("missing network support: %s", n)
 		}

@@ -28,9 +28,21 @@ func (c *BaseCommController) GetSupportedAssets(ctx echo.Context) error {
 	if err != nil {
 		return c.FailJson(ctx, err)
 	}
+	wallets, err := data.GetAvailableWalletAddress()
+	if err != nil {
+		return c.FailJson(ctx, err)
+	}
+
+	networkSet := make(map[string]struct{})
+	for _, w := range wallets {
+		networkSet[w.Network] = struct{}{}
+	}
 
 	grouped := make(map[string][]string)
 	for _, item := range list {
+		if _, ok := networkSet[item.Network]; !ok {
+			continue
+		}
 		grouped[item.Network] = append(grouped[item.Network], item.Token)
 	}
 
