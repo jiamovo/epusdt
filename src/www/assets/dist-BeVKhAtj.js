@@ -1,0 +1,1 @@
+import{$u as e,Qu as t,nd as n}from"./messages-BOl-zx8S.js";var r=n(e(),1),i=t(),a=r.createContext(void 0),o=e=>{let{dir:t,children:n}=e;return(0,i.jsx)(a.Provider,{value:t,children:n})};function s(e){let t=r.useContext(a);return e||t||`ltr`}export{s as n,o as t};

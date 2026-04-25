@@ -167,6 +167,21 @@ func doFormPost(e *echo.Echo, path string, values url.Values) *httptest.Response
 	return rec
 }
 
+func TestRootPostRoute(t *testing.T) {
+	e := setupTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "hello epusdt, https://github.com/GMwalletApp/epusdt" {
+		t.Fatalf("unexpected body: %q", body)
+	}
+}
+
 // TestCreateOrderGmpayV1Solana tests the gmpay route with solana network.
 func TestCreateOrderGmpayV1Solana(t *testing.T) {
 	e := setupTestEnv(t)

@@ -1,1 +1,0 @@
-import{t as e}from"./forbidden-Waph2URh.js";var t=e;export{t as component};

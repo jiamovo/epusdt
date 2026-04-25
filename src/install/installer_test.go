@@ -95,6 +95,55 @@ func TestInstallAPIDefaults(t *testing.T) {
 	}
 }
 
+func TestInstallServerRootRedirectsToInstall(t *testing.T) {
+	dir := t.TempDir()
+	wwwRoot := filepath.Join(dir, "www")
+	if err := os.MkdirAll(wwwRoot, 0o755); err != nil {
+		t.Fatalf("mkdir www root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wwwRoot, "index.html"), []byte("install-ui"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+
+	e, _ := newInstallServer(filepath.Join(dir, ".env"), wwwRoot)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/install" {
+		t.Fatalf("Location = %q, want /install", got)
+	}
+}
+
+func TestInstallServerServesSPAOnInstallRoute(t *testing.T) {
+	dir := t.TempDir()
+	wwwRoot := filepath.Join(dir, "www")
+	if err := os.MkdirAll(wwwRoot, 0o755); err != nil {
+		t.Fatalf("mkdir www root: %v", err)
+	}
+	const wantBody = "install-ui"
+	if err := os.WriteFile(filepath.Join(wwwRoot, "index.html"), []byte(wantBody), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+
+	e, _ := newInstallServer(filepath.Join(dir, ".env"), wwwRoot)
+
+	req := httptest.NewRequest(http.MethodGet, "/install", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); body != wantBody {
+		t.Fatalf("body = %q, want %q", body, wantBody)
+	}
+}
+
 func TestInstallAPISubmit(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")

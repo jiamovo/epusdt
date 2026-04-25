@@ -22,7 +22,7 @@ import (
 
 // RegisterRoute 路由注册
 func RegisterRoute(e *echo.Echo) {
-	e.Any("/", func(c echo.Context) error {
+	e.POST("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "hello epusdt, https://github.com/GMwalletApp/epusdt")
 	})
 

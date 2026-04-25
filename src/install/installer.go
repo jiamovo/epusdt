@@ -79,6 +79,60 @@ type installHandler struct {
 	done        chan struct{}
 }
 
+func installRootRedirectMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if c.Request().Method == http.MethodGet && c.Request().URL.Path == "/" {
+			return c.Redirect(http.StatusFound, "/install")
+		}
+		return next(c)
+	}
+}
+
+func resolveInstallWWWRoot() string {
+	// Resolve www/ relative to the executable so SPA routes work regardless
+	// of the working directory. main.go extracts www/ next to the binary.
+	wwwRoot := "./www"
+	if exePath, err := os.Executable(); err == nil {
+		if exePath, err = filepath.EvalSymlinks(exePath); err == nil {
+			wwwRoot = filepath.Join(filepath.Dir(exePath), "www")
+		}
+	}
+	return wwwRoot
+}
+
+func newInstallServer(envFilePath, wwwRoot string) (*echo.Echo, *installHandler) {
+	h := &installHandler{
+		envFilePath: envFilePath,
+		done:        make(chan struct{}),
+	}
+
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+
+	// api routes for the install frontend
+	api := e.Group("/api")
+
+	api.GET("/install/defaults", h.GetDefaults)
+	api.POST("/install", h.Submit)
+
+	// Redirect browser visits on root to /install so first-run users land
+	// on the wizard directly. This must run before the static middleware,
+	// otherwise "/" is intercepted by the SPA index.html fallback.
+	e.Use(installRootRedirectMiddleware)
+
+	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
+		Skipper: func(c echo.Context) bool {
+			return luluHttp.ShouldSkipSPAFallback(c.Request().URL.Path)
+		},
+		HTML5: true,
+		Index: "index.html",
+		Root:  wwwRoot,
+	}))
+
+	return e, h
+}
+
 // GetDefaults returns default values for the install form.
 //
 // @Summary      Install — get default values
@@ -172,37 +226,7 @@ func RunInstallServer(listenAddr, envFilePath string) {
 		listenAddr = DefaultInstallAddr
 	}
 
-	h := &installHandler{
-		envFilePath: envFilePath,
-		done:        make(chan struct{}),
-	}
-
-	e := echo.New()
-	e.HideBanner = true
-	e.HidePort = true
-
-	// api routes for the install frontend
-	api := e.Group("/api")
-
-	api.GET("/install/defaults", h.GetDefaults)
-	api.POST("/install", h.Submit)
-
-	// Resolve www/ relative to the executable so SPA routes work regardless
-	// of the working directory. main.go extracts www/ next to the binary.
-	wwwRoot := "./www"
-	if exePath, err := os.Executable(); err == nil {
-		if exePath, err = filepath.EvalSymlinks(exePath); err == nil {
-			wwwRoot = filepath.Join(filepath.Dir(exePath), "www")
-		}
-	}
-	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
-		Skipper: func(c echo.Context) bool {
-			return luluHttp.ShouldSkipSPAFallback(c.Request().URL.Path)
-		},
-		HTML5: true,
-		Index: "index.html",
-		Root:  wwwRoot,
-	}))
+	e, h := newInstallServer(envFilePath, resolveInstallWWWRoot())
 
 	// Build a human-readable URL for the console hint.
 	installHost := listenAddr
