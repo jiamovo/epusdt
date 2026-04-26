@@ -7,13 +7,20 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/assimon/luuu/util/http_client"
+	"github.com/GMWalletApp/epusdt/util/http_client"
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
 )
+
+// parseFloat is the minimal helper used by the settings bridge; kept
+// here so settings_bridge.go stays import-free.
+func parseFloat(s string) (float64, error) {
+	return strconv.ParseFloat(strings.TrimSpace(s), 64)
+}
 
 var (
 	HTTPAccessLog      bool
@@ -27,15 +34,24 @@ var (
 	TgBotToken         string
 	TgProxy            string
 	TgManage           int64
-	UsdtRate           float64
-	RateApiUrl         string
-	TRON_GRID_API_KEY  string
 	BuildVersion       = "0.0.0-dev"
 	BuildCommit        = "none"
 	BuildDate          = "unknown"
 	configRootPath     string
 	explicitConfigPath string
 )
+
+func resolveExecutableDir() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(exePath), nil
+}
 
 func SetConfigPath(path string) {
 	explicitConfigPath = strings.TrimSpace(path)
@@ -57,7 +73,11 @@ func Init() {
 	SQLDebug = viper.GetBool("sql_debug")
 	LogLevel = normalizeLogLevel(viper.GetString("log_level"))
 	StaticPath = normalizeStaticURLPath(viper.GetString("static_path"))
-	StaticFilePath = filepath.Join(configRootPath, strings.TrimPrefix(StaticPath, "/"))
+	exeDir, err := resolveExecutableDir()
+	if err != nil {
+		panic(err)
+	}
+	StaticFilePath = filepath.Join(exeDir, "static")
 	RuntimePath = resolvePathFromBase(configRootPath, viper.GetString("runtime_root_path"), filepath.Join(configRootPath, "runtime"))
 	LogSavePath = resolvePathFromBase(RuntimePath, viper.GetString("log_save_path"), filepath.Join(RuntimePath, "logs"))
 	mustMkdir(RuntimePath)
@@ -70,9 +90,6 @@ func Init() {
 	TgBotToken = viper.GetString("tg_bot_token")
 	TgProxy = viper.GetString("tg_proxy")
 	TgManage = viper.GetInt64("tg_manage")
-
-	RateApiUrl = GetRateApiUrl()
-	TRON_GRID_API_KEY = viper.GetString("tron_grid_api_key")
 }
 
 func mustMkdir(path string) {
@@ -122,6 +139,57 @@ func resolveConfigFilePath() (string, error) {
 		return normalizeConfiguredPath(envPath)
 	}
 	return normalizeConfiguredPath(".env")
+}
+
+// NeedsInstall returns true when the first-run install wizard should run.
+// It returns true if the config file does not exist yet, or if the file
+// exists and contains install=true (an explicit reset flag).
+// Existing installs that have no install key are NOT affected.
+func NeedsInstall() bool {
+	envPath, exists := ResolveConfigPath()
+	if !exists {
+		return true
+	}
+	// Read just the install key without triggering full Init().
+	v := viper.New()
+	v.SetConfigFile(envPath)
+	if err := v.ReadInConfig(); err != nil {
+		// Unreadable config → treat as needing install.
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(v.GetString("install")), "true")
+}
+
+// ResolveConfigPath returns the absolute path to the .env file and whether
+// it currently exists on disk. Unlike resolveConfigFilePath it does not
+// return an error when the file is absent — callers (e.g. the install
+// wizard) need the target path even before the file is written.
+func ResolveConfigPath() (path string, exists bool) {
+	candidate := explicitConfigPath
+	if candidate == "" {
+		if e := strings.TrimSpace(os.Getenv("EPUSDT_CONFIG")); e != "" {
+			candidate = e
+		} else {
+			candidate = ".env"
+		}
+	}
+	// Resolve relative paths against cwd.
+	p := strings.TrimSpace(candidate)
+	if !filepath.IsAbs(p) {
+		cwd, err := os.Getwd()
+		if err == nil {
+			p = filepath.Join(cwd, p)
+		}
+	}
+	info, err := os.Stat(p)
+	if err == nil && info.IsDir() {
+		p = filepath.Join(p, ".env")
+		info, err = os.Stat(p)
+	}
+	if err != nil {
+		return p, false
+	}
+	return p, true
 }
 
 func normalizeConfiguredPath(input string) (string, error) {
@@ -178,11 +246,19 @@ func GetAppUri() string {
 	return viper.GetString("app_uri")
 }
 
-func GetApiAuthToken() string {
-	return viper.GetString("api_auth_token")
+func GetRateApiUrl() string {
+	// settings table wins (admin-configurable); .env and env var remain
+	// as fallbacks for smooth migration from the old layout.
+	if db := settingsRateApiUrl(); db != "" {
+		return db
+	}
+	return GetRateApiUrlFromEnv()
 }
 
-func GetRateApiUrl() string {
+// GetRateApiUrlFromEnv returns the rate API URL read only from the
+// .env / environment variables, bypassing the settings table. Used
+// by bootstrap to seed the settings table from the initial .env value.
+func GetRateApiUrlFromEnv() string {
 	rateURL := viper.GetString("api_rate_url")
 	if rateURL == "" {
 		rateURL = os.Getenv("API_RATE_URL")
@@ -190,7 +266,6 @@ func GetRateApiUrl() string {
 	if rateURL == "" {
 		log.Println("api_rate_url is empty")
 	}
-	RateApiUrl = rateURL
 	return rateURL
 }
 
@@ -212,13 +287,14 @@ func GetRateForCoin(coin string, base string) float64 {
 			if usdtRate > 0 {
 				return 1 / usdtRate
 			}
+			return 0
 		}
 	}
+	return getRateForCoinFromAPI(coin, base)
+}
 
-	baseURL := RateApiUrl
-	if baseURL == "" {
-		baseURL = GetRateApiUrl()
-	}
+func getRateForCoinFromAPI(coin string, base string) float64 {
+	baseURL := GetRateApiUrl()
 	if baseURL == "" {
 		log.Printf("rate api url is empty")
 		return 0.0
@@ -250,14 +326,18 @@ func GetRateForCoin(coin string, base string) float64 {
 }
 
 func GetUsdtRate() float64 {
-	forcedUsdtRate := viper.GetFloat64("forced_usdt_rate")
-	if forcedUsdtRate > 0 {
-		return forcedUsdtRate
+	// Only the admin setting can force the USDT/CNY rate. When the
+	// setting is unset, zero, or negative, fall back to the rate API.
+	if forced := settingsForcedUsdtRate(); forced > 0 {
+		return forced
 	}
-	if UsdtRate <= 0 {
-		return 6.4
+
+	apiRate := getRateForCoinFromAPI("usdt", "cny")
+	if apiRate > 0 {
+		return 1 / apiRate
 	}
-	return UsdtRate
+	log.Printf("usdt/cny rate unavailable: rate.forced_usdt_rate <= 0 and rate api returned no data")
+	return 0
 }
 
 func GetOrderExpirationTime() int {
@@ -327,24 +407,4 @@ func GetCallbackRetryBaseDuration() time.Duration {
 		seconds = 5
 	}
 	return time.Duration(seconds) * time.Second
-}
-
-func GetSolanaRpcUrl() string {
-	rpcUrl := viper.GetString("solana_rpc_url")
-	if rpcUrl == "" {
-		return "https://api.mainnet-beta.solana.com"
-	}
-	return rpcUrl
-}
-
-func GetEthereumWsUrl() string {
-	return strings.TrimSpace(viper.GetString("ethereum_ws_url"))
-}
-
-func GetEpayPid() int {
-	return viper.GetInt("epay_pid")
-}
-
-func GetEpayKey() string {
-	return viper.GetString("epay_key")
 }
