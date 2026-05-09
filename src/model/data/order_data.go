@@ -202,6 +202,18 @@ func MarkOrderSelected(tradeId string) error {
 		Update("is_selected", true).Error
 }
 
+// ExpireOrderByTradeID marks a waiting order as expired. Used to retire failed
+// child-order attempts that should not remain selectable/reusable.
+func ExpireOrderByTradeID(tradeId string) error {
+	return dao.Mdb.Model(&mdb.Orders{}).
+		Where("trade_id = ?", tradeId).
+		Where("status = ?", mdb.StatusWaitPay).
+		Updates(map[string]interface{}{
+			"status":      mdb.StatusExpired,
+			"is_selected": false,
+		}).Error
+}
+
 // RefreshOrderExpiration resets created_at to now so the expiration timer restarts.
 // Called on the parent order when a sub-order is created or returned.
 func RefreshOrderExpiration(tradeId string) error {

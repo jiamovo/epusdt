@@ -612,6 +612,81 @@ func TestOrderProcessingSubOrderPaidParentKeepsOwnFields(t *testing.T) {
 	}
 }
 
+func TestOrderProcessingParentDirectPayExpiresOkPayProviderOrder(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if _, err := data.AddWalletAddress("TTestTronAddress001"); err != nil {
+		t.Fatalf("add tron wallet: %v", err)
+	}
+
+	parentReq := newCreateTransactionRequest("order_parent_direct_okpay_expire", 1)
+	parentReq.Network = mdb.NetworkTron
+	parentResp, err := CreateTransaction(parentReq, nil)
+	if err != nil {
+		t.Fatalf("create parent order: %v", err)
+	}
+
+	subOrder := &mdb.Orders{
+		TradeId:         "okpay_sub_parent_direct_expire",
+		OrderId:         "okpay_sub_parent_direct_expire",
+		ParentTradeId:   parentResp.TradeId,
+		Amount:          parentResp.Amount,
+		Currency:        parentResp.Currency,
+		ActualAmount:    0.15,
+		ReceiveAddress:  "OKPAY",
+		Token:           "USDT",
+		Network:         mdb.NetworkTron,
+		Status:          mdb.StatusWaitPay,
+		NotifyUrl:       "",
+		CallBackConfirm: mdb.CallBackConfirmOk,
+		PayProvider:     mdb.PaymentProviderOkPay,
+	}
+	if err := dao.Mdb.Create(subOrder).Error; err != nil {
+		t.Fatalf("create okpay sub-order: %v", err)
+	}
+	providerRow := &mdb.ProviderOrder{
+		TradeId:         subOrder.TradeId,
+		Provider:        mdb.PaymentProviderOkPay,
+		ProviderOrderID: "okp-parent-direct-expire",
+		PayURL:          "https://t.me/ExampleWalletBot?start=shop_deposit--okpay-order-parent-direct-expire",
+		Amount:          subOrder.ActualAmount,
+		Coin:            subOrder.Token,
+		Status:          mdb.ProviderOrderStatusPending,
+	}
+	if err := dao.Mdb.Create(providerRow).Error; err != nil {
+		t.Fatalf("create provider row: %v", err)
+	}
+
+	err = OrderProcessing(&request.OrderProcessingRequest{
+		ReceiveAddress:     parentResp.ReceiveAddress,
+		Token:              strings.ToUpper(parentResp.Token),
+		Network:            mdb.NetworkTron,
+		TradeId:            parentResp.TradeId,
+		Amount:             parentResp.ActualAmount,
+		BlockTransactionId: "block_parent_direct_okpay_expire",
+	})
+	if err != nil {
+		t.Fatalf("order processing parent direct pay: %v", err)
+	}
+
+	expiredSub, err := data.GetOrderInfoByTradeId(subOrder.TradeId)
+	if err != nil {
+		t.Fatalf("reload sub-order: %v", err)
+	}
+	if expiredSub.Status != mdb.StatusExpired {
+		t.Fatalf("sub-order status = %d, want %d", expiredSub.Status, mdb.StatusExpired)
+	}
+
+	expiredProviderRow, err := data.GetProviderOrderByTradeIDAndProvider(subOrder.TradeId, mdb.PaymentProviderOkPay)
+	if err != nil {
+		t.Fatalf("reload provider row: %v", err)
+	}
+	if expiredProviderRow.Status != mdb.ProviderOrderStatusExpired {
+		t.Fatalf("provider row status = %q, want %q", expiredProviderRow.Status, mdb.ProviderOrderStatusExpired)
+	}
+}
+
 // TestOrderProcessingSubOrderExpiresSiblingsAndReleasesLocks verifies that when one
 // sub-order is paid all sibling sub-orders are expired and their runtime locks (as
 // well as the parent's lock) are released.

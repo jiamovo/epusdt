@@ -12,6 +12,19 @@ const (
 	PaymentTypeEpay = "Epay"
 )
 
+const (
+	// PaymentProviderOnChain means this concrete order record is settled by
+	// sending funds to a directly assigned wallet address on a supported chain.
+	PaymentProviderOnChain = "on_chain"
+	// PaymentProviderOkPay means this concrete order record is settled through
+	// the third-party OkayPay/OkPay hosted checkout flow.
+	//
+	// In the current design this is typically used by a switch-network-created
+	// child order, while the parent order keeps its original merchant-facing
+	// semantics and callback behavior.
+	PaymentProviderOkPay = "okpay"
+)
+
 type Orders struct {
 	TradeId            string  `gorm:"column:trade_id;uniqueIndex:orders_trade_id_uindex" json:"trade_id" example:"T2026041612345678"`
 	OrderId            string  `gorm:"column:order_id;uniqueIndex:orders_order_id_uindex" json:"order_id" example:"ORD20260416001"`
@@ -33,7 +46,17 @@ type Orders struct {
 	CallBackConfirm int    `gorm:"column:callback_confirm;default:2" json:"callback_confirm" enums:"1,2" example:"2"`
 	IsSelected      bool   `gorm:"column:is_selected;default:false" json:"is_selected" example:"false"`
 	PaymentType     string `gorm:"column:payment_type" json:"payment_type" example:"Epay"`
-	ApiKeyID        uint64 `gorm:"column:api_key_id;default:0;index:orders_api_key_id_index" json:"api_key_id" example:"1"`
+	// PayProvider identifies how this specific order row is collected.
+	//
+	// Semantics:
+	//   - parent orders and regular chain child orders use on_chain
+	//   - third-party hosted checkout child orders use their provider name
+	//     (for example okpay)
+	//
+	// Existing rows default to on_chain for backward compatibility so upgrades
+	// can rely on AutoMigrate without rewriting old orders.
+	PayProvider string `gorm:"column:pay_provider;size:32;default:on_chain;index:orders_pay_provider_index" json:"pay_provider" example:"on_chain"`
+	ApiKeyID    uint64 `gorm:"column:api_key_id;default:0;index:orders_api_key_id_index" json:"api_key_id" example:"1"`
 	// PayBySubId holds the primary-key ID of the sub-order that settled this parent order.
 	// Zero when the parent order was paid directly (no sub-order involved).
 	PayBySubId uint64 `gorm:"column:pay_by_sub_id;default:0" json:"pay_by_sub_id" example:"0"`

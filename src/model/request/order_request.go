@@ -43,7 +43,7 @@ type OrderProcessingRequest struct {
 type SwitchNetworkRequest struct {
 	TradeId string `json:"trade_id" validate:"required" example:"T2026041612345678"`
 	Token   string `json:"token" validate:"required" example:"USDT"`
-	Network string `json:"network" validate:"required" example:"ethereum"`
+	Network string `json:"network" validate:"required" example:"okpay,tron,solana,ethereum"`
 }
 
 func (r SwitchNetworkRequest) Translates() map[string]string {

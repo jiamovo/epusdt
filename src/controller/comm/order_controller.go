@@ -60,12 +60,14 @@ func (c *BaseCommController) CreateTransaction(ctx echo.Context) (err error) {
 
 // SwitchNetwork 切换支付网络，创建或返回子订单
 // @Summary      Switch payment network
-// @Description  Switch to a different payment network, creating or returning a sub-order
+// @Description  Switch to a different payment target, creating or returning a sub-order.
+// @Description  Normal values such as tron/solana/ethereum create on-chain child orders.
+// @Description  The special value okpay creates or reuses an OkPay-hosted child order and returns its payment_url.
 // @Tags         Payment
 // @Accept       json
 // @Produce      json
 // @Param        request body request.SwitchNetworkRequest true "Switch network payload"
-// @Success      200 {object} response.ApiResponse
+// @Success      200 {object} response.ApiResponse{data=response.CheckoutCounterResponse}
 // @Failure      400 {object} response.ApiResponse
 // @Router       /pay/switch-network [post]
 func (c *BaseCommController) SwitchNetwork(ctx echo.Context) (err error) {

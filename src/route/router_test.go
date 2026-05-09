@@ -1,8 +1,11 @@
 package route
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,8 +17,10 @@ import (
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
+	"github.com/GMWalletApp/epusdt/util/http_client"
 	"github.com/GMWalletApp/epusdt/util/log"
 	"github.com/GMWalletApp/epusdt/util/sign"
+	"github.com/go-resty/resty/v2"
 	"github.com/labstack/echo/v4"
 	"github.com/spf13/viper"
 	"gorm.io/gorm/clause"
@@ -64,6 +69,7 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 		&mdb.Chain{},
 		&mdb.ChainToken{},
 		&mdb.RpcNode{},
+		&mdb.ProviderOrder{},
 	)
 
 	// reset the settings cache so stale entries from a prior test don't leak
@@ -134,6 +140,47 @@ func signBody(body map[string]interface{}) map[string]interface{} {
 	sig, _ := sign.Get(body, testAPIToken)
 	body["signature"] = sig
 	return body
+}
+
+func signOkPayNotifyPayload(shopToken string, body map[string]interface{}) string {
+	data, _ := body["data"].(map[string]interface{})
+	ordered := []struct {
+		key   string
+		value string
+	}{
+		{"code", stringifyOkPayTestValue(body["code"])},
+		{"data[order_id]", stringifyOkPayTestValue(data["order_id"])},
+		{"data[unique_id]", stringifyOkPayTestValue(data["unique_id"])},
+		{"data[pay_user_id]", stringifyOkPayTestValue(data["pay_user_id"])},
+		{"data[amount]", stringifyOkPayTestValue(data["amount"])},
+		{"data[coin]", stringifyOkPayTestValue(data["coin"])},
+		{"data[status]", stringifyOkPayTestValue(data["status"])},
+		{"data[type]", stringifyOkPayTestValue(data["type"])},
+		{"id", stringifyOkPayTestValue(body["id"])},
+		{"status", stringifyOkPayTestValue(body["status"])},
+	}
+
+	pairs := make([]string, 0, len(ordered))
+	for _, item := range ordered {
+		if item.value == "" {
+			continue
+		}
+		pairs = append(pairs, url.QueryEscape(item.key)+"="+url.QueryEscape(item.value))
+	}
+	query, _ := url.QueryUnescape(strings.Join(pairs, "&"))
+	sum := md5.Sum([]byte(query + "&token=" + shopToken))
+	return strings.ToUpper(hex.EncodeToString(sum[:]))
+}
+
+func stringifyOkPayTestValue(value interface{}) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
 }
 
 func doPost(e *echo.Echo, path string, body map[string]interface{}) *httptest.ResponseRecorder {
@@ -311,11 +358,11 @@ func TestCreateOrderGmpayV1FormData(t *testing.T) {
 	t.Logf("Form-data order created: trade_id=%v", data["trade_id"])
 }
 
-// getSupportedNetworks is a helper that calls GET /payments/gmpay/v1/supported-assets
+// getSupportedNetworks is a helper that calls GET /payments/gmpay/v1/config
 // and returns a map of network → []token for easy assertions.
 func getSupportedNetworks(t *testing.T, e *echo.Echo) map[string][]string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/supported-assets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/config", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -323,7 +370,7 @@ func getSupportedNetworks(t *testing.T, e *echo.Echo) map[string][]string {
 	}
 	resp := parseResp(t, rec)
 	rawData, _ := resp["data"].(map[string]interface{})
-	rawSupports, _ := rawData["supports"].([]interface{})
+	rawSupports, _ := rawData["supported_assets"].([]interface{})
 	result := make(map[string][]string, len(rawSupports))
 	for _, item := range rawSupports {
 		row := item.(map[string]interface{})
@@ -340,7 +387,7 @@ func getSupportedNetworks(t *testing.T, e *echo.Echo) map[string][]string {
 
 // TestGetSupportedAssets_ChainTokenToggle verifies that:
 //   - disabling a chain_token removes that token (and possibly the whole network)
-//     from the /supported-assets response
+//     from the /config supported_assets response
 //   - re-enabling it brings it back
 func TestGetSupportedAssets_ChainTokenToggle(t *testing.T) {
 	e := setupTestEnv(t)
@@ -348,7 +395,7 @@ func TestGetSupportedAssets_ChainTokenToggle(t *testing.T) {
 	// Baseline: tron should appear with USDT and TRX.
 	before := getSupportedNetworks(t, e)
 	if _, ok := before["tron"]; !ok {
-		t.Fatal("expected tron in baseline supported-assets")
+		t.Fatal("expected tron in baseline config.supported_assets")
 	}
 
 	// Disable the tron USDT chain_token.
@@ -372,7 +419,7 @@ func TestGetSupportedAssets_ChainTokenToggle(t *testing.T) {
 
 	afterAllDisabled := getSupportedNetworks(t, e)
 	if _, ok := afterAllDisabled["tron"]; ok {
-		t.Fatal("tron should disappear from supported-assets when all its chain_tokens are disabled")
+		t.Fatal("tron should disappear from config.supported_assets when all its chain_tokens are disabled")
 	}
 	t.Logf("After disabling all tron tokens: networks = %v", afterAllDisabled)
 
@@ -400,7 +447,7 @@ func TestGetSupportedAssets_ChainTokenToggle(t *testing.T) {
 
 // TestGetSupportedAssets_WalletAddressToggle verifies that:
 //   - disabling ALL wallet addresses for a network removes that network from
-//     the /supported-assets response (even if chain + tokens are still enabled)
+//     the /config supported_assets response (even if chain + tokens are still enabled)
 //   - re-enabling any address brings the network back
 func TestGetSupportedAssets_WalletAddressToggle(t *testing.T) {
 	e := setupTestEnv(t)
@@ -408,7 +455,7 @@ func TestGetSupportedAssets_WalletAddressToggle(t *testing.T) {
 	// Baseline: solana should be present.
 	before := getSupportedNetworks(t, e)
 	if _, ok := before["solana"]; !ok {
-		t.Fatal("expected solana in baseline supported-assets")
+		t.Fatal("expected solana in baseline config.supported_assets")
 	}
 
 	// Disable the only solana wallet address.
@@ -418,7 +465,7 @@ func TestGetSupportedAssets_WalletAddressToggle(t *testing.T) {
 
 	after := getSupportedNetworks(t, e)
 	if _, ok := after["solana"]; ok {
-		t.Fatal("solana should disappear from supported-assets when all its wallet addresses are disabled")
+		t.Fatal("solana should disappear from config.supported_assets when all its wallet addresses are disabled")
 	}
 	t.Logf("After disabling solana wallets: networks = %v", after)
 
@@ -434,10 +481,22 @@ func TestGetSupportedAssets_WalletAddressToggle(t *testing.T) {
 	t.Logf("After re-enabling solana wallets: solana tokens = %v", restored["solana"])
 }
 
-func TestGetSupportedAssetsPublic(t *testing.T) {
+func TestGetPublicConfig(t *testing.T) {
 	e := setupTestEnv(t)
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandCheckoutName, "asd", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.checkout_name: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandLogoUrl, "https://cdn.example.com/logo.png", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.logo_url: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandSiteTitle, "asd title", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.site_title: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandSupportUrl, "https://example.com/support", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.support_url: %v", err)
+	}
 
-	req := httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/supported-assets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/config", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -450,16 +509,56 @@ func TestGetSupportedAssetsPublic(t *testing.T) {
 		t.Fatalf("expected status_code=200, got %v", resp["status_code"])
 	}
 
-	data, ok := resp["data"].(map[string]interface{})
+	respData, ok := resp["data"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected object data, got %T", resp["data"])
 	}
-	supports, ok := data["supports"].([]interface{})
+	supports, ok := respData["supported_assets"].([]interface{})
 	if !ok {
-		t.Fatalf("expected supports array, got %T", data["supports"])
+		t.Fatalf("expected supported_assets array, got %T", respData["supported_assets"])
 	}
 	if len(supports) < 2 {
 		t.Fatalf("expected >= 2 network supports, got %d", len(supports))
+	}
+	site, ok := respData["site"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected site object, got %T", respData["site"])
+	}
+	if site["cashier_name"] != "asd" {
+		t.Fatalf("site.cashier_name = %v, want asd", site["cashier_name"])
+	}
+	if site["logo_url"] != "https://cdn.example.com/logo.png" {
+		t.Fatalf("site.logo_url = %v", site["logo_url"])
+	}
+	if site["website_title"] != "asd title" {
+		t.Fatalf("site.website_title = %v, want asd title", site["website_title"])
+	}
+	if site["support_link"] != "https://example.com/support" {
+		t.Fatalf("site.support_link = %v", site["support_link"])
+	}
+	epay, ok := respData["epay"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected epay object, got %T", respData["epay"])
+	}
+	if epay["default_network"] != "tron" {
+		t.Fatalf("epay.default_network = %v, want tron", epay["default_network"])
+	}
+	okpay, ok := respData["okpay"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected okpay object, got %T", respData["okpay"])
+	}
+	if okpay["enabled"] != false {
+		t.Fatalf("okpay.enabled = %v, want false", okpay["enabled"])
+	}
+	allowTokens, ok := okpay["allow_tokens"].([]interface{})
+	if !ok || len(allowTokens) != 2 {
+		t.Fatalf("expected okpay.allow_tokens array, got %T %#v", okpay["allow_tokens"], okpay["allow_tokens"])
+	}
+	if _, exists := okpay["shop_id"]; exists {
+		t.Fatalf("public config should not expose okpay.shop_id: %#v", okpay)
+	}
+	if _, exists := okpay["shop_token"]; exists {
+		t.Fatalf("public config should not expose okpay.shop_token: %#v", okpay)
 	}
 
 	seen := map[string]bool{}
@@ -472,6 +571,322 @@ func TestGetSupportedAssetsPublic(t *testing.T) {
 		if !seen[n] {
 			t.Fatalf("missing network support: %s", n)
 		}
+	}
+
+	if got := data.GetOkPayCallbackURL(); got != "http://localhost:8080/payments/okpay/v1/notify" {
+		t.Fatalf("default okpay callback_url = %q, want %q", got, "http://localhost:8080/payments/okpay/v1/notify")
+	}
+}
+
+func TestGetPublicConfig_BrandLegacyFallback(t *testing.T) {
+	e := setupTestEnv(t)
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandSiteName, "legacy cashier", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.site_name: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandPageTitle, "legacy title", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.page_title: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandSupportUrl, "https://legacy.example.com/help", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.support_url: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/config", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	resp := parseResp(t, rec)
+	respData, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected object data, got %T", resp["data"])
+	}
+	site, ok := respData["site"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected site object, got %T", respData["site"])
+	}
+	if site["cashier_name"] != "legacy cashier" {
+		t.Fatalf("site.cashier_name = %v, want legacy cashier", site["cashier_name"])
+	}
+	if site["website_title"] != "legacy title" {
+		t.Fatalf("site.website_title = %v, want legacy title", site["website_title"])
+	}
+	if site["support_link"] != "https://legacy.example.com/help" {
+		t.Fatalf("site.support_link = %v", site["support_link"])
+	}
+}
+
+func TestOkPayNotifyRouteExists(t *testing.T) {
+	e := setupTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/payments/okpay/v1/notify", strings.NewReader(""))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusNotFound {
+		t.Fatalf("expected okpay notify route to exist, got 404")
+	}
+}
+
+type okPayNotifyFixture struct {
+	Parent      *mdb.Orders
+	Child       *mdb.Orders
+	ProviderRow *mdb.ProviderOrder
+	Payload     map[string]interface{}
+}
+
+func seedOkPayNotifyFixture(t *testing.T) *okPayNotifyFixture {
+	t.Helper()
+
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayEnabled, "true", mdb.SettingTypeBool); err != nil {
+		t.Fatalf("seed okpay.enabled: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopID, "okpay-shop-test", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_id: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopToken, "token-1", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_token: %v", err)
+	}
+
+	parent := &mdb.Orders{
+		TradeId:        "parent-okpay-notify-001",
+		OrderId:        "merchant-okpay-notify-001",
+		Amount:         1,
+		Currency:       "CNY",
+		ActualAmount:   0.15,
+		ReceiveAddress: "TTestTronAddress001",
+		Token:          "USDT",
+		Network:        mdb.NetworkTron,
+		Status:         mdb.StatusWaitPay,
+		NotifyUrl:      "http://localhost/notify",
+		PaymentType:    mdb.PaymentTypeEpay,
+		PayProvider:    mdb.PaymentProviderOnChain,
+	}
+	if err := dao.Mdb.Create(parent).Error; err != nil {
+		t.Fatalf("create parent order: %v", err)
+	}
+
+	child := &mdb.Orders{
+		TradeId:        "okpay-unique-test-001",
+		ParentTradeId:  parent.TradeId,
+		OrderId:        "merchant-okpay-notify-001-sub",
+		Amount:         1,
+		Currency:       "CNY",
+		ActualAmount:   0.15,
+		ReceiveAddress: "OKPAY",
+		Token:          "USDT",
+		Network:        mdb.NetworkTron,
+		Status:         mdb.StatusWaitPay,
+		NotifyUrl:      "",
+		PaymentType:    mdb.PaymentTypeEpay,
+		PayProvider:    mdb.PaymentProviderOkPay,
+	}
+	if err := dao.Mdb.Create(child).Error; err != nil {
+		t.Fatalf("create child order: %v", err)
+	}
+
+	providerRow := &mdb.ProviderOrder{
+		TradeId:         child.TradeId,
+		Provider:        mdb.PaymentProviderOkPay,
+		ProviderOrderID: "okpay-order-test-001",
+		PayURL:          "https://t.me/ExampleWalletBot?start=shop_deposit--okpay-order-test-001",
+		Amount:          0.15,
+		Coin:            "USDT",
+		Status:          mdb.ProviderOrderStatusPending,
+	}
+	if err := dao.Mdb.Create(providerRow).Error; err != nil {
+		t.Fatalf("create provider row: %v", err)
+	}
+
+	payload := map[string]interface{}{
+		"code":   200,
+		"id":     "okpay-shop-test",
+		"status": "success",
+		"data": map[string]interface{}{
+			"order_id":    providerRow.ProviderOrderID,
+			"unique_id":   child.TradeId,
+			"pay_user_id": 1234567890,
+			"amount":      "0.15000000",
+			"coin":        "USDT",
+			"status":      1,
+			"type":        "deposit",
+		},
+	}
+	payload["sign"] = signOkPayNotifyPayload("token-1", payload)
+
+	return &okPayNotifyFixture{
+		Parent:      parent,
+		Child:       child,
+		ProviderRow: providerRow,
+		Payload:     payload,
+	}
+}
+
+func buildOkPayNotifyFormValues(payload map[string]interface{}) url.Values {
+	values := url.Values{}
+	values.Set("code", stringifyOkPayTestValue(payload["code"]))
+	values.Set("id", stringifyOkPayTestValue(payload["id"]))
+	values.Set("status", stringifyOkPayTestValue(payload["status"]))
+	values.Set("sign", stringifyOkPayTestValue(payload["sign"]))
+
+	dataMap, _ := payload["data"].(map[string]interface{})
+	values.Set("data[order_id]", stringifyOkPayTestValue(dataMap["order_id"]))
+	values.Set("data[unique_id]", stringifyOkPayTestValue(dataMap["unique_id"]))
+	values.Set("data[pay_user_id]", stringifyOkPayTestValue(dataMap["pay_user_id"]))
+	values.Set("data[amount]", stringifyOkPayTestValue(dataMap["amount"]))
+	values.Set("data[coin]", stringifyOkPayTestValue(dataMap["coin"]))
+	values.Set("data[status]", stringifyOkPayTestValue(dataMap["status"]))
+	values.Set("data[type]", stringifyOkPayTestValue(dataMap["type"]))
+	return values
+}
+
+func assertOkPayNotifyProcessed(t *testing.T, fixture *okPayNotifyFixture) {
+	t.Helper()
+
+	paidChild, err := data.GetOrderInfoByTradeId(fixture.Child.TradeId)
+	if err != nil {
+		t.Fatalf("load paid child: %v", err)
+	}
+	if paidChild.Status != mdb.StatusPaySuccess {
+		t.Fatalf("child status = %d, want %d", paidChild.Status, mdb.StatusPaySuccess)
+	}
+	if paidChild.BlockTransactionId != fixture.ProviderRow.ProviderOrderID {
+		t.Fatalf("child block_transaction_id = %q, want %q", paidChild.BlockTransactionId, fixture.ProviderRow.ProviderOrderID)
+	}
+
+	paidParent, err := data.GetOrderInfoByTradeId(fixture.Parent.TradeId)
+	if err != nil {
+		t.Fatalf("load paid parent: %v", err)
+	}
+	if paidParent.Status != mdb.StatusPaySuccess {
+		t.Fatalf("parent status = %d, want %d", paidParent.Status, mdb.StatusPaySuccess)
+	}
+	if paidParent.PayBySubId != paidChild.ID {
+		t.Fatalf("parent pay_by_sub_id = %d, want %d", paidParent.PayBySubId, paidChild.ID)
+	}
+
+	savedProviderRow, err := data.GetProviderOrderByTradeIDAndProvider(fixture.Child.TradeId, mdb.PaymentProviderOkPay)
+	if err != nil {
+		t.Fatalf("load provider row: %v", err)
+	}
+	if savedProviderRow.Status != mdb.ProviderOrderStatusPaid {
+		t.Fatalf("provider row status = %q, want %q", savedProviderRow.Status, mdb.ProviderOrderStatusPaid)
+	}
+	if savedProviderRow.NotifyRaw == "" {
+		t.Fatal("provider row notify_raw should be saved")
+	}
+}
+
+func TestOkPayNotify_JSONPayloadMarksOrdersPaid(t *testing.T) {
+	e := setupTestEnv(t)
+	fixture := seedOkPayNotifyFixture(t)
+
+	rawBody, err := json.Marshal(fixture.Payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/payments/okpay/v1/notify", strings.NewReader(string(rawBody)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("okpay notify failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.TrimSpace(rec.Body.String()) != "success" {
+		t.Fatalf("okpay notify response = %q, want success", rec.Body.String())
+	}
+
+	assertOkPayNotifyProcessed(t, fixture)
+}
+
+func TestOkPayNotify_FormPayloadMarksOrdersPaid(t *testing.T) {
+	e := setupTestEnv(t)
+	fixture := seedOkPayNotifyFixture(t)
+
+	formValues := buildOkPayNotifyFormValues(fixture.Payload)
+	req := httptest.NewRequest(http.MethodPost, "/payments/okpay/v1/notify", strings.NewReader(formValues.Encode()))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("okpay form notify failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.TrimSpace(rec.Body.String()) != "success" {
+		t.Fatalf("okpay form notify response = %q, want success", rec.Body.String())
+	}
+
+	assertOkPayNotifyProcessed(t, fixture)
+}
+
+func TestOkPayNotify_ExpiresSiblingOkPayProviderOrder(t *testing.T) {
+	e := setupTestEnv(t)
+	fixture := seedOkPayNotifyFixture(t)
+
+	sibling := &mdb.Orders{
+		TradeId:        "okpay-unique-test-002",
+		ParentTradeId:  fixture.Parent.TradeId,
+		OrderId:        "merchant-okpay-notify-001-sibling",
+		Amount:         1,
+		Currency:       "CNY",
+		ActualAmount:   0.15,
+		ReceiveAddress: "OKPAY",
+		Token:          "USDT",
+		Network:        mdb.NetworkTron,
+		Status:         mdb.StatusWaitPay,
+		NotifyUrl:      "",
+		PaymentType:    mdb.PaymentTypeEpay,
+		PayProvider:    mdb.PaymentProviderOkPay,
+	}
+	if err := dao.Mdb.Create(sibling).Error; err != nil {
+		t.Fatalf("create sibling order: %v", err)
+	}
+	siblingProvider := &mdb.ProviderOrder{
+		TradeId:         sibling.TradeId,
+		Provider:        mdb.PaymentProviderOkPay,
+		ProviderOrderID: "okpay-order-test-002",
+		PayURL:          "https://t.me/ExampleWalletBot?start=shop_deposit--okpay-order-test-002",
+		Amount:          0.15,
+		Coin:            "USDT",
+		Status:          mdb.ProviderOrderStatusPending,
+	}
+	if err := dao.Mdb.Create(siblingProvider).Error; err != nil {
+		t.Fatalf("create sibling provider row: %v", err)
+	}
+
+	rawBody, err := json.Marshal(fixture.Payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/payments/okpay/v1/notify", strings.NewReader(string(rawBody)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("okpay notify failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	expiredSibling, err := data.GetOrderInfoByTradeId(sibling.TradeId)
+	if err != nil {
+		t.Fatalf("reload sibling order: %v", err)
+	}
+	if expiredSibling.Status != mdb.StatusExpired {
+		t.Fatalf("sibling status = %d, want %d", expiredSibling.Status, mdb.StatusExpired)
+	}
+
+	expiredSiblingProvider, err := data.GetProviderOrderByTradeIDAndProvider(sibling.TradeId, mdb.PaymentProviderOkPay)
+	if err != nil {
+		t.Fatalf("reload sibling provider row: %v", err)
+	}
+	if expiredSiblingProvider.Status != mdb.ProviderOrderStatusExpired {
+		t.Fatalf("sibling provider status = %q, want %q", expiredSiblingProvider.Status, mdb.ProviderOrderStatusExpired)
 	}
 }
 
@@ -708,4 +1123,192 @@ func TestSwitchNetwork_WithOrder(t *testing.T) {
 	if resp["data"] == nil {
 		t.Fatal("expected data in switch-network response")
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func stubRestyClient(fn roundTripFunc) *resty.Client {
+	return resty.NewWithClient(&http.Client{Transport: fn})
+}
+
+func TestSwitchNetwork_OkPayCreatesProviderSubOrder(t *testing.T) {
+	e := setupTestEnv(t)
+
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayEnabled, "true", mdb.SettingTypeBool); err != nil {
+		t.Fatalf("seed okpay.enabled: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopID, "shop-1", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_id: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopToken, "token-1", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_token: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayCallbackURL, "https://example.com/okpay/notify", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.callback_url: %v", err)
+	}
+
+	origFactory := http_client.ClientFactory
+	http_client.ClientFactory = func() *resty.Client {
+		return stubRestyClient(func(req *http.Request) (*http.Response, error) {
+			if req.URL.String() != "https://api.okaypay.me/shop/payLink" {
+				t.Fatalf("unexpected okpay URL: %s", req.URL.String())
+			}
+			if err := req.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := req.Form.Get("coin"); got != "USDT" {
+				t.Fatalf("coin = %q, want USDT", got)
+			}
+			if req.Form.Get("callback_url") == "" {
+				t.Fatal("callback_url should be set")
+			}
+			body := `{"status":"success","code":200,"data":{"order_id":"okp-order-1","pay_url":"https://pay.okaypay.test/abc"}}`
+			header := make(http.Header)
+			header.Set("Content-Type", "application/json")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     header,
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		})
+	}
+	t.Cleanup(func() {
+		http_client.ClientFactory = origFactory
+	})
+
+	createBody := signBody(map[string]interface{}{
+		"order_id":   "switch-okpay-parent-001",
+		"amount":     1.00,
+		"token":      "usdt",
+		"currency":   "cny",
+		"network":    "solana",
+		"notify_url": "http://localhost/notify",
+	})
+	createRec := doPost(e, "/payments/gmpay/v1/order/create-transaction", createBody)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create parent order failed: %d %s", createRec.Code, createRec.Body.String())
+	}
+	createResp := parseResp(t, createRec)
+	tradeID, _ := createResp["data"].(map[string]interface{})["trade_id"].(string)
+	if tradeID == "" {
+		t.Fatal("missing parent trade_id")
+	}
+
+	rec := doPost(e, "/pay/switch-network", map[string]interface{}{
+		"trade_id": tradeID,
+		"token":    "USDT",
+		"network":  "okpay",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("switch-network okpay failed: %d %s", rec.Code, rec.Body.String())
+	}
+	resp := parseResp(t, rec)
+	dataMap, _ := resp["data"].(map[string]interface{})
+	if dataMap["payment_url"] != "https://pay.okaypay.test/abc" {
+		t.Fatalf("payment_url = %v, want okpay url", dataMap["payment_url"])
+	}
+	if dataMap["network"] != "tron" {
+		t.Fatalf("network = %v, want tron", dataMap["network"])
+	}
+	if dataMap["receive_address"] != "OKPAY" {
+		t.Fatalf("receive_address = %v, want OKPAY", dataMap["receive_address"])
+	}
+
+	subTradeID, _ := dataMap["trade_id"].(string)
+	if subTradeID == "" || subTradeID == tradeID {
+		t.Fatalf("expected child trade_id, got %q", subTradeID)
+	}
+	subOrder, err := data.GetOrderInfoByTradeId(subTradeID)
+	if err != nil {
+		t.Fatalf("load sub-order: %v", err)
+	}
+	if subOrder.PayProvider != mdb.PaymentProviderOkPay {
+		t.Fatalf("pay_provider = %q, want %q", subOrder.PayProvider, mdb.PaymentProviderOkPay)
+	}
+	providerRow, err := data.GetProviderOrderByTradeIDAndProvider(subTradeID, mdb.PaymentProviderOkPay)
+	if err != nil {
+		t.Fatalf("load provider row: %v", err)
+	}
+	if providerRow.ProviderOrderID != "okp-order-1" {
+		t.Fatalf("provider_order_id = %q, want okp-order-1", providerRow.ProviderOrderID)
+	}
+	if providerRow.PayURL != "https://pay.okaypay.test/abc" {
+		t.Fatalf("pay_url = %q", providerRow.PayURL)
+	}
+}
+
+func TestSwitchNetwork_OkPayIntegration(t *testing.T) {
+	shopID := strings.TrimSpace(os.Getenv("EPUSDT_OKPAY_ID"))
+	if shopID == "" {
+		shopID = strings.TrimSpace(os.Getenv("OKPAY_ID"))
+	}
+	if shopID == "" {
+		shopID = strings.TrimSpace(os.Getenv("EPUSDT_OKPAY_TEST_SHOP_ID"))
+	}
+	shopToken := strings.TrimSpace(os.Getenv("EPUSDT_OKPAY_TOKEN"))
+	if shopToken == "" {
+		shopToken = strings.TrimSpace(os.Getenv("OKPAY_TOKEN"))
+	}
+	if shopToken == "" {
+		shopToken = strings.TrimSpace(os.Getenv("EPUSDT_OKPAY_TEST_SHOP_TOKEN"))
+	}
+	if shopID == "" || shopToken == "" {
+		t.Skip("set EPUSDT_OKPAY_ID/EPUSDT_OKPAY_TOKEN (or OKPAY_ID/OKPAY_TOKEN) to run OkPay integration test")
+	}
+
+	e := setupTestEnv(t)
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayEnabled, "true", mdb.SettingTypeBool); err != nil {
+		t.Fatalf("seed okpay.enabled: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopID, shopID, mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_id: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopToken, shopToken, mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_token: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayCallbackURL, "https://example.com/okpay-notify", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.callback_url: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayReturnURL, "https://example.com/okpay-return", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.return_url: %v", err)
+	}
+
+	createBody := signBody(map[string]interface{}{
+		"order_id":   "switch-okpay-live-001",
+		"amount":     1.00,
+		"token":      "usdt",
+		"currency":   "cny",
+		"network":    "solana",
+		"notify_url": "http://localhost/notify",
+	})
+	createRec := doPost(e, "/payments/gmpay/v1/order/create-transaction", createBody)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create parent order failed: %d %s", createRec.Code, createRec.Body.String())
+	}
+	createResp := parseResp(t, createRec)
+	tradeID, _ := createResp["data"].(map[string]interface{})["trade_id"].(string)
+	if tradeID == "" {
+		t.Fatal("missing parent trade_id")
+	}
+
+	rec := doPost(e, "/pay/switch-network", map[string]interface{}{
+		"trade_id": tradeID,
+		"token":    "USDT",
+		"network":  "okpay",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("switch-network okpay failed: %d %s", rec.Code, rec.Body.String())
+	}
+	resp := parseResp(t, rec)
+	dataMap, _ := resp["data"].(map[string]interface{})
+	paymentURL, _ := dataMap["payment_url"].(string)
+	if paymentURL == "" {
+		t.Fatalf("missing payment_url in response: %v", dataMap)
+	}
+	t.Logf("OkPay payment_url=%s", paymentURL)
 }

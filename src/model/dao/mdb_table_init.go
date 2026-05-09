@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/gookit/color"
 	"gorm.io/gorm/clause"
@@ -35,6 +36,7 @@ func MdbTableInit() {
 			{"Chain", &mdb.Chain{}},
 			{"ChainToken", &mdb.ChainToken{}},
 			{"RpcNode", &mdb.RpcNode{}},
+			{"ProviderOrder", &mdb.ProviderOrder{}},
 		}
 		for _, m := range migrations {
 			if err := Mdb.AutoMigrate(m.model); err != nil {
@@ -132,10 +134,19 @@ func seedRpcNodes() {
 // seedDefaultSettings inserts built-in default settings.
 // Uses ON CONFLICT DO NOTHING so admin edits persist across restarts.
 func seedDefaultSettings() {
+	okPayCallbackURL := strings.TrimRight(strings.TrimSpace(config.GetAppUri()), "/")
+	if okPayCallbackURL != "" {
+		okPayCallbackURL += "/payments/okpay/v1/notify"
+	}
 	defaults := []mdb.Setting{
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultToken, Value: "usdt", Type: mdb.SettingTypeString},
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultCurrency, Value: "cny", Type: mdb.SettingTypeString},
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultNetwork, Value: "tron", Type: mdb.SettingTypeString},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayEnabled, Value: "false", Type: mdb.SettingTypeBool},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayAPIURL, Value: "https://api.okaypay.me/shop/", Type: mdb.SettingTypeString},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayCallbackURL, Value: okPayCallbackURL, Type: mdb.SettingTypeString},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayTimeoutSeconds, Value: "10", Type: mdb.SettingTypeInt},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayAllowTokens, Value: "USDT,TRX", Type: mdb.SettingTypeString},
 	}
 	if err := Mdb.Clauses(clause.OnConflict{DoNothing: true}).Create(&defaults).Error; err != nil {
 		color.Red.Printf("[store_db] seed default settings err=%s\n", err)

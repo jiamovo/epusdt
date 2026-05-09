@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"gorm.io/gorm/clause"
@@ -155,6 +156,89 @@ var sensitiveSettingKeys = []string{
 	mdb.SettingKeyInitAdminPasswordHash,
 	mdb.SettingKeyInitAdminPasswordFetched,
 	mdb.SettingKeyInitAdminPasswordChanged,
+}
+
+func getFirstNonEmptySetting(fallback string, keys ...string) string {
+	for _, key := range keys {
+		value := strings.TrimSpace(GetSettingString(key, ""))
+		if value != "" {
+			return value
+		}
+	}
+	return fallback
+}
+
+func GetBrandCashierName() string {
+	return getFirstNonEmptySetting("", mdb.SettingKeyBrandCheckoutName, mdb.SettingKeyBrandSiteName)
+}
+
+func GetBrandLogoURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandLogoUrl, ""))
+}
+
+func GetBrandWebsiteTitle() string {
+	return getFirstNonEmptySetting("", mdb.SettingKeyBrandSiteTitle, mdb.SettingKeyBrandPageTitle)
+}
+
+func GetBrandSupportURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandSupportUrl, ""))
+}
+
+// OkPay settings helpers keep the provider-specific defaults in one place so
+// business logic does not need to repeat raw settings keys.
+func GetOkPayEnabled() bool {
+	return GetSettingBool(mdb.SettingKeyOkPayEnabled, false)
+}
+
+func GetOkPayShopID() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayShopID, ""))
+}
+
+func GetOkPayShopToken() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayShopToken, ""))
+}
+
+func GetOkPayAPIURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayAPIURL, "https://api.okaypay.me/shop/"))
+}
+
+func GetOkPayCallbackURL() string {
+	if configured := strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayCallbackURL, "")); configured != "" {
+		return configured
+	}
+	appURI := strings.TrimSpace(config.GetAppUri())
+	if appURI == "" {
+		return ""
+	}
+	return strings.TrimRight(appURI, "/") + "/payments/okpay/v1/notify"
+}
+
+func GetOkPayReturnURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayReturnURL, ""))
+}
+
+func GetOkPayTimeoutSeconds() int {
+	return GetSettingInt(mdb.SettingKeyOkPayTimeoutSeconds, 10)
+}
+
+func GetOkPayAllowTokens() []string {
+	raw := GetSettingString(mdb.SettingKeyOkPayAllowTokens, "USDT,TRX")
+	if strings.TrimSpace(raw) == "" {
+		return []string{"USDT", "TRX"}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		token := strings.ToUpper(strings.TrimSpace(part))
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	if len(out) == 0 {
+		return []string{"USDT", "TRX"}
+	}
+	return out
 }
 
 // ListSettingsByGroup returns all rows for a given group (empty group = all),

@@ -18,6 +18,9 @@ var Errno = map[int]string{
 	10013: "order is not awaiting payment",
 	10014: "chain is not enabled",
 	10016: "supported asset not found",
+	10017: "payment provider is not enabled",
+	10018: "payment provider configuration is incomplete",
+	10019: "payment provider does not support this token or network",
 }
 
 var (
@@ -38,6 +41,9 @@ var (
 	OrderNotWaitPay            = Err(10013)
 	ChainNotEnabled            = Err(10014)
 	SupportedAssetNotFound     = Err(10016)
+	PaymentProviderNotEnabled  = Err(10017)
+	PaymentProviderConfigErr   = Err(10018)
+	PaymentProviderNotSupport  = Err(10019)
 )
 
 type RspError struct {

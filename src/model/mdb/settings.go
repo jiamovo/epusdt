@@ -1,9 +1,10 @@
 package mdb
 
 // Setting stores non-credential runtime configuration as key/value pairs.
-// Groups: brand, rate, system, epay. Merchant credentials (pid + secret_key)
-// live in the api_keys table; notification configs live in NotificationChannel.
-// Default rows for the epay group are seeded on first startup (see
+// Groups: brand, rate, system, epay, okpay. Merchant credentials (pid +
+// secret_key) live in the api_keys table; notification configs live in
+// NotificationChannel.
+// Default rows for the epay/okpay groups are seeded on first startup (see
 // model/dao/mdb_table_init.go seedDefaultSettings). All other groups start
 // empty and fall back to hardcoded defaults until an admin sets them.
 // Only exception: system.jwt_secret is auto-generated on first startup.
@@ -12,6 +13,7 @@ const (
 	SettingGroupRate   = "rate"
 	SettingGroupSystem = "system"
 	SettingGroupEpay   = "epay"
+	SettingGroupOkPay  = "okpay"
 )
 
 const (
@@ -28,9 +30,12 @@ const (
 	SettingKeyInitAdminPasswordFetched = "system.init_admin_password_fetched"
 	SettingKeyInitAdminPasswordChanged = "system.init_admin_password_changed"
 	SettingKeyOrderExpiration          = "system.order_expiration_time"
+	SettingKeyBrandCheckoutName        = "brand.checkout_name"
 	SettingKeyBrandSiteName            = "brand.site_name"
 	SettingKeyBrandLogoUrl             = "brand.logo_url"
+	SettingKeyBrandSiteTitle           = "brand.site_title"
 	SettingKeyBrandPageTitle           = "brand.page_title"
+	SettingKeyBrandSuccessCopy         = "brand.success_copy"
 	SettingKeyBrandPaySuccess          = "brand.pay_success_text"
 	SettingKeyBrandSupportUrl          = "brand.support_url"
 	SettingKeyRateForcedUsdt           = "rate.forced_usdt_rate"
@@ -42,10 +47,20 @@ const (
 	SettingKeyEpayDefaultToken    = "epay.default_token"
 	SettingKeyEpayDefaultCurrency = "epay.default_currency"
 	SettingKeyEpayDefaultNetwork  = "epay.default_network"
+
+	// OkPay hosted-checkout settings.
+	SettingKeyOkPayEnabled        = "okpay.enabled"
+	SettingKeyOkPayShopID         = "okpay.shop_id"
+	SettingKeyOkPayShopToken      = "okpay.shop_token"
+	SettingKeyOkPayAPIURL         = "okpay.api_url"
+	SettingKeyOkPayCallbackURL    = "okpay.callback_url"
+	SettingKeyOkPayReturnURL      = "okpay.return_url"
+	SettingKeyOkPayTimeoutSeconds = "okpay.timeout_seconds"
+	SettingKeyOkPayAllowTokens    = "okpay.allow_tokens"
 )
 
 type Setting struct {
-	Group       string `gorm:"column:group;size:32;index:settings_group_index" json:"group" enums:"brand,rate,system" example:"rate"`
+	Group       string `gorm:"column:group;size:32;index:settings_group_index" json:"group" enums:"brand,rate,system,epay,okpay" example:"rate"`
 	Key         string `gorm:"column:key;uniqueIndex:settings_key_uindex;size:128" json:"key" example:"rate.forced_usdt_rate"`
 	Value       string `gorm:"column:value;type:text" json:"value" example:"7.2"`
 	Type        string `gorm:"column:type;size:16;default:string" json:"type" enums:"string,int,bool,json" example:"string"`

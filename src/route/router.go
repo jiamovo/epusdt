@@ -45,9 +45,11 @@ func RegisterRoute(e *echo.Echo) {
 	// gmpay v1 routes
 	gmpayV1 := paymentRoute.Group("/gmpay/v1")
 	gmpayV1.POST("/order/create-transaction", comm.Ctrl.CreateTransaction, middleware.CheckApiSign())
-	gmpayV1.GET("/supported-assets", comm.Ctrl.GetSupportedAssets)
-	// gmpayV1.GET("/supported-assets/records", comm.Ctrl.ListSupportedAssetRecords)
-	// gmpayV1.GET("/supported-assets/:id", comm.Ctrl.GetSupportedAsset)
+	gmpayV1.GET("/config", comm.Ctrl.GetPublicConfig)
+
+	// okpay v1 routes
+	okpayV1 := paymentRoute.Group("/okpay/v1")
+	okpayV1.POST("/notify", comm.Ctrl.OkPayNotify)
 
 	// epay v1 routes
 	//
@@ -222,8 +224,7 @@ func registerAdminRoutes(e *echo.Echo) {
 	authed.POST("/notification-channels/:id/status", admin.Ctrl.ChangeNotificationChannelStatus)
 	authed.DELETE("/notification-channels/:id", admin.Ctrl.DeleteNotificationChannel)
 
-	//	gmpayV1.GET("/supported-assets", comm.Ctrl.GetSupportedAssets)
-	authed.GET("/supported-assets", comm.Ctrl.GetSupportedAssets) // wrap for admin console, same handler as public endpoint
+	authed.GET("/config", comm.Ctrl.GetPublicConfig) // wrap for admin console, same payload as public endpoint
 
 	// Chains
 	authed.GET("/chains", admin.Ctrl.ListChains)
