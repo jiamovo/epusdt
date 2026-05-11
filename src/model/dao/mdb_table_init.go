@@ -139,6 +139,7 @@ func seedDefaultSettings() {
 		okPayCallbackURL += "/payments/okpay/v1/notify"
 	}
 	defaults := []mdb.Setting{
+		{Group: mdb.SettingGroupSystem, Key: mdb.SettingKeyAmountPrecision, Value: "2", Type: mdb.SettingTypeInt},
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultToken, Value: "usdt", Type: mdb.SettingTypeString},
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultCurrency, Value: "cny", Type: mdb.SettingTypeString},
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultNetwork, Value: "tron", Type: mdb.SettingTypeString},

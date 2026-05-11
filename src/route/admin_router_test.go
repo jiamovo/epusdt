@@ -718,6 +718,63 @@ func TestAdminSettings_ListAndUpsert(t *testing.T) {
 	assertOK(t, rec)
 }
 
+func TestAdminSettings_AmountPrecisionValidationAndListing(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "system", "key": mdb.SettingKeyAmountPrecision, "value": "4", "type": "int"},
+		},
+	}, token)
+	resp := assertOK(t, rec)
+	results, ok := resp["data"].([]interface{})
+	if !ok || len(results) != 1 {
+		t.Fatalf("expected one result, got %T %v", resp["data"], resp["data"])
+	}
+	result, _ := results[0].(map[string]interface{})
+	if result["ok"] != true {
+		t.Fatalf("amount precision upsert result = %v", result)
+	}
+
+	rec = doGetAdmin(e, "/admin/api/v1/settings?group=system", token)
+	resp = assertOK(t, rec)
+	rows, ok := resp["data"].([]interface{})
+	if !ok {
+		t.Fatalf("expected settings array, got %T", resp["data"])
+	}
+	found := false
+	for _, row := range rows {
+		item, _ := row.(map[string]interface{})
+		if item["key"] == mdb.SettingKeyAmountPrecision {
+			found = true
+			if item["value"] != "4" {
+				t.Fatalf("amount precision value = %v, want 4", item["value"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected settings list to include %s", mdb.SettingKeyAmountPrecision)
+	}
+
+	rec = doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "system", "key": mdb.SettingKeyAmountPrecision, "value": "7", "type": "int"},
+			{"group": "system", "key": mdb.SettingKeyAmountPrecision, "value": "abc", "type": "int"},
+		},
+	}, token)
+	resp = assertOK(t, rec)
+	results, ok = resp["data"].([]interface{})
+	if !ok || len(results) != 2 {
+		t.Fatalf("expected two results, got %T %v", resp["data"], resp["data"])
+	}
+	for _, item := range results {
+		result, _ := item.(map[string]interface{})
+		if result["ok"] != false {
+			t.Fatalf("invalid amount precision result = %v, want ok=false", result)
+		}
+	}
+}
+
 // TestAdminSettings_DeleteNonExistent verifies deleting a non-existent setting.
 func TestAdminSettings_DeleteNonExistent(t *testing.T) {
 	e, token := setupAdminTestEnv(t)

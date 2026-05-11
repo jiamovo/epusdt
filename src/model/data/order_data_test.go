@@ -1,6 +1,7 @@
 package data
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,51 @@ func TestEvmTransactionLockAddressIsCaseInsensitive(t *testing.T) {
 	}
 	if gotTradeID != "" {
 		t.Fatalf("expected lock to be released, got trade id %q", gotTradeID)
+	}
+}
+
+func TestTransactionLockPrecisionPreventsEquivalentAmountsOnly(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "2", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set precision 2: %v", err)
+	}
+	if err := LockTransaction(mdb.NetworkTron, "TPrecisionAddress001", "USDT", "trade-old", 1.23, time.Hour); err != nil {
+		t.Fatalf("lock old transaction: %v", err)
+	}
+
+	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "4", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set precision 4: %v", err)
+	}
+	if err := LockTransaction(mdb.NetworkTron, "TPrecisionAddress001", "USDT", "trade-equivalent", 1.2300, time.Hour); !errors.Is(err, ErrTransactionLocked) {
+		t.Fatalf("equivalent lock error = %v, want %v", err, ErrTransactionLocked)
+	}
+	if err := LockTransaction(mdb.NetworkTron, "TPrecisionAddress001", "USDT", "trade-new", 1.2301, time.Hour); err != nil {
+		t.Fatalf("distinct precision lock: %v", err)
+	}
+}
+
+func TestTransactionLockLookupUsesStoredPrecision(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "4", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set precision 4: %v", err)
+	}
+	if err := LockTransaction(mdb.NetworkTron, "TPrecisionAddress002", "USDT", "trade-precise", 1.2345, time.Hour); err != nil {
+		t.Fatalf("lock precise transaction: %v", err)
+	}
+	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "2", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set precision 2: %v", err)
+	}
+
+	gotTradeID, err := GetTradeIdByWalletAddressAndAmountAndToken(mdb.NetworkTron, "TPrecisionAddress002", "USDT", 1.2345)
+	if err != nil {
+		t.Fatalf("lookup transaction lock: %v", err)
+	}
+	if gotTradeID != "trade-precise" {
+		t.Fatalf("trade id = %q, want trade-precise", gotTradeID)
 	}
 }
 

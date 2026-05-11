@@ -44,6 +44,9 @@ func RuntimeInit() error {
 	if err = RuntimeDB.Exec("DROP INDEX IF EXISTS transaction_lock_address_token_amount_uindex").Error; err != nil {
 		return err
 	}
+	if err = RuntimeDB.Exec("DROP INDEX IF EXISTS transaction_lock_network_address_token_amount_uindex").Error; err != nil {
+		return err
+	}
 	if err = RuntimeDB.AutoMigrate(&mdb.TransactionLock{}); err != nil {
 		color.Red.Printf("[runtime_db] sqlite migrate DB(TransactionLock),err=%s\n", err)
 		return err

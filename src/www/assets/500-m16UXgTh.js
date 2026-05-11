@@ -1,1 +1,0 @@
-import{t as e}from"./general-error-wYLXT3cx.js";var t=e;export{t as component};

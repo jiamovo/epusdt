@@ -97,6 +97,59 @@ func TestCreateTransactionAssignsIncrementedAmountsAndLocks(t *testing.T) {
 	}
 }
 
+func TestCreateTransactionUsesConfiguredAmountPrecision(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := data.SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "4", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set amount precision: %v", err)
+	}
+	if _, err := data.AddWalletAddress("wallet_precision_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+
+	resp1, err := CreateTransaction(newCreateTransactionRequest("order_precision_1", 1), nil)
+	if err != nil {
+		t.Fatalf("create first transaction: %v", err)
+	}
+	resp2, err := CreateTransaction(newCreateTransactionRequest("order_precision_2", 1), nil)
+	if err != nil {
+		t.Fatalf("create second transaction: %v", err)
+	}
+
+	if got := fmt.Sprintf("%.4f", resp1.ActualAmount); got != "1.0000" {
+		t.Fatalf("first actual amount = %s, want 1.0000", got)
+	}
+	if got := fmt.Sprintf("%.4f", resp2.ActualAmount); got != "1.0001" {
+		t.Fatalf("second actual amount = %s, want 1.0001", got)
+	}
+}
+
+func TestCreateTransactionStoresNormalizedMerchantAmount(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if _, err := data.AddWalletAddress("wallet_normalized_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+
+	resp, err := CreateTransaction(newCreateTransactionRequest("order_normalized_1", 100.129), nil)
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+	if got := fmt.Sprintf("%.2f", resp.Amount); got != "100.13" {
+		t.Fatalf("response amount = %s, want 100.13", got)
+	}
+
+	order, err := data.GetOrderInfoByTradeId(resp.TradeId)
+	if err != nil {
+		t.Fatalf("load order: %v", err)
+	}
+	if got := fmt.Sprintf("%.2f", order.Amount); got != "100.13" {
+		t.Fatalf("stored amount = %s, want 100.13", got)
+	}
+}
+
 func TestCreateTransactionUsesRateAPIWhenForcedSettingIsNotPositive(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()

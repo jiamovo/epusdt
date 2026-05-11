@@ -471,7 +471,7 @@ const (
 	Token2022ProgramID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 )
 
-// ADJustAmount 将链上原始金额转为可读金额（除以 10^decimals，保留 2 位小数）
+// ADJustAmount 将链上原始金额转为可读金额（除以 10^decimals，保留到系统支持的最大匹配精度）
 func ADJustAmount(amount uint64, decimals int) float64 {
 	if amount == 0 {
 		return 0
@@ -480,8 +480,7 @@ func ADJustAmount(amount uint64, decimals int) float64 {
 	// 10^decimals
 	decimalDivisor := decimal.New(1, int32(decimals))
 	adjustedAmount := decimalAmount.Div(decimalDivisor)
-	// Round to 2 decimal places
-	return math.MustParsePrecFloat64(adjustedAmount.InexactFloat64(), 2)
+	return math.MustParsePrecFloat64(adjustedAmount.InexactFloat64(), data.MaxAmountPrecision)
 }
 
 func MatchUsdtAtaAddress(address string, ataTo string) bool {

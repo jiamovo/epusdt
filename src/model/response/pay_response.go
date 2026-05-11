@@ -2,8 +2,8 @@ package response
 
 type CheckoutCounterResponse struct {
 	TradeId        string  `json:"trade_id" example:"T2026041612345678"`          //  epusdt订单号
-	Amount         float64 `json:"amount" example:"100.0000"`                     //  订单金额，保留4位小数 法币金额
-	ActualAmount   float64 `json:"actual_amount" example:"14.2857"`               //  订单实际需要支付的金额，保留4位小数 加密货币金额
+	Amount         float64 `json:"amount" example:"100.0000"`                     //  订单金额，按 system.amount_precision 保留小数 法币金额
+	ActualAmount   float64 `json:"actual_amount" example:"14.2857"`               //  订单实际需要支付的金额，按 system.amount_precision 保留小数 加密货币金额
 	Token          string  `json:"token" example:"USDT"`                          //  所属币种 TRX USDT......
 	Currency       string  `json:"currency" example:"CNY"`                        //  法币币种 CNY USD ...
 	ReceiveAddress string  `json:"receive_address" example:"TTestTronAddress001"` //  收款钱包地址

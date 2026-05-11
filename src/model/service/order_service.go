@@ -24,7 +24,6 @@ import (
 const (
 	CnyMinimumPaymentAmount  = 0.01
 	UsdtMinimumPaymentAmount = 0.01
-	UsdtAmountPerIncrement   = 0.01
 	IncrementalMaximumNumber = 100
 )
 
@@ -61,7 +60,8 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 	token := strings.ToUpper(strings.TrimSpace(req.Token))
 	currency := strings.ToUpper(strings.TrimSpace(req.Currency))
 	network := strings.ToLower(strings.TrimSpace(req.Network))
-	payAmount := math.MustParsePrecFloat64(req.Amount, 2)
+	amountPrecision := data.GetAmountPrecision()
+	payAmount := math.MustParsePrecFloat64(req.Amount, amountPrecision)
 	rate := config.GetRateForCoin(strings.ToLower(token), strings.ToLower(currency))
 	if rate <= 0 {
 		return nil, constant.RateAmountErr
@@ -96,7 +96,7 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 	}
 
 	tradeID := GenerateCode()
-	amount := math.MustParsePrecFloat64(decimalTokenAmount.InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalTokenAmount.InexactFloat64(), amountPrecision)
 	availableAddress, availableAmount, err := ReserveAvailableWalletAndAmount(tradeID, network, token, amount, walletAddress)
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 	order := &mdb.Orders{
 		TradeId:        tradeID,
 		OrderId:        req.OrderId,
-		Amount:         req.Amount,
+		Amount:         payAmount,
 		Currency:       currency,
 		ActualAmount:   availableAmount,
 		ReceiveAddress: availableAddress,
@@ -280,6 +280,7 @@ func OrderProcessing(req *request.OrderProcessingRequest) error {
 func ReserveAvailableWalletAndAmount(tradeID string, network string, token string, amount float64, walletAddress []mdb.WalletAddress) (string, float64, error) {
 	availableAddress := ""
 	availableAmount := amount
+	amountPrecision := data.GetAmountPrecision()
 
 	tryLockWalletFunc := func(targetAmount float64) (string, error) {
 		for _, address := range walletAddress {
@@ -303,8 +304,8 @@ func ReserveAvailableWalletAndAmount(tradeID string, network string, token strin
 		}
 		if address == "" {
 			decimalOldAmount := decimal.NewFromFloat(availableAmount)
-			decimalIncr := decimal.NewFromFloat(UsdtAmountPerIncrement)
-			availableAmount = decimalOldAmount.Add(decimalIncr).InexactFloat64()
+			decimalIncr := decimal.New(1, int32(-amountPrecision))
+			availableAmount = math.MustParsePrecFloat64(decimalOldAmount.Add(decimalIncr).InexactFloat64(), amountPrecision)
 			continue
 		}
 		availableAddress = address
@@ -414,7 +415,7 @@ func SwitchNetwork(req *request.SwitchNetworkRequest) (*response.CheckoutCounter
 	}
 
 	subTradeID := GenerateCode()
-	amount := math.MustParsePrecFloat64(decimalTokenAmount.InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalTokenAmount.InexactFloat64(), data.GetAmountPrecision())
 	availableAddress, availableAmount, err := ReserveAvailableWalletAndAmount(subTradeID, network, token, amount, walletAddress)
 	if err != nil {
 		return nil, err
@@ -531,7 +532,7 @@ func switchToOkPay(parent *mdb.Orders, token string) (*response.CheckoutCounterR
 	}
 
 	subTradeID := GenerateCode()
-	amount := math.MustParsePrecFloat64(decimalTokenAmount.InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalTokenAmount.InexactFloat64(), data.GetAmountPrecision())
 	returnURL := strings.TrimSpace(parent.RedirectUrl)
 	if returnURL == "" {
 		returnURL = data.GetOkPayReturnURL()

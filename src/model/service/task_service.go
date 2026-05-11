@@ -54,7 +54,7 @@ func TryProcessTronTRC20Transfer(token mdb.ChainToken, toAddr string, rawValue *
 	}
 
 	decimalQuant := decimal.NewFromBigInt(rawValue, 0)
-	amount := math.MustParsePrecFloat64(decimalQuant.Div(decimal.New(1, int32(decimals))).InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalQuant.Div(decimal.New(1, int32(decimals))).InexactFloat64(), data.MaxAmountPrecision)
 	if amount <= 0 {
 		return
 	}
@@ -126,7 +126,7 @@ func TryProcessTronTRXTransfer(toAddr string, rawSun int64, txHash string, block
 	}
 
 	decimalQuant := decimal.NewFromInt(rawSun)
-	amount := math.MustParsePrecFloat64(decimalQuant.Div(decimal.NewFromInt(1_000_000)).InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalQuant.Div(decimal.NewFromInt(1_000_000)).InexactFloat64(), data.MaxAmountPrecision)
 	if amount <= 0 {
 		return
 	}
@@ -222,7 +222,7 @@ func TryProcessEvmERC20Transfer(chainNetwork string, contract common.Address, to
 	pow := decimal.New(1, int32(decimals))
 
 	decimalQuant := decimal.NewFromBigInt(rawValue, 0)
-	amount := math.MustParsePrecFloat64(decimalQuant.Div(pow).InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalQuant.Div(pow).InexactFloat64(), data.MaxAmountPrecision)
 	if amount <= 0 {
 		log.Sugar.Warnf("[%s-%s][%s] skip non-positive amount %.2f", net, tokenSym, walletAddr, amount)
 		return
@@ -293,11 +293,13 @@ func sendPaymentNotification(order *mdb.Orders) {
 		}
 	}
 
+	precision := data.GetAmountPrecision()
+	amountFormat := fmt.Sprintf("%%.%df", precision)
 	msg := fmt.Sprintf(
 		"🎉 <b>收款成功通知</b>\n\n"+
 			"💰 <b>金额信息</b>\n"+
-			"├ 订单金额：<code>%.2f %s</code>\n"+
-			"└ 实际到账：<code>%.2f %s</code>\n\n"+
+			"├ 订单金额：<code>"+amountFormat+" %s</code>\n"+
+			"└ 实际到账：<code>"+amountFormat+" %s</code>\n\n"+
 			"📋 <b>订单信息</b>\n"+
 			"├ 交易号：<code>%s</code>\n"+
 			"├ 订单号：<code>%s</code>\n"+

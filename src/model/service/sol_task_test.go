@@ -236,7 +236,7 @@ func TestAdjustAmount(t *testing.T) {
 			name:     "USDT amount (6 decimals)",
 			amount:   123456789,
 			decimals: 6,
-			want:     123.46,
+			want:     123.456789,
 		},
 		{
 			name:     "USDC amount (6 decimals)",
@@ -260,7 +260,7 @@ func TestAdjustAmount(t *testing.T) {
 			name:     "Small amount",
 			amount:   1,
 			decimals: 6,
-			want:     0.0,
+			want:     0.000001,
 		},
 	}
 

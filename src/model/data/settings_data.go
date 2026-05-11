@@ -119,6 +119,25 @@ func GetSettingBool(key string, fallback bool) bool {
 	return b
 }
 
+const (
+	DefaultAmountPrecision = 2
+	MinAmountPrecision     = 2
+	MaxAmountPrecision     = 6
+)
+
+// NormalizeAmountPrecision clamps external precision values to the supported
+// range used by order creation and transaction matching.
+func NormalizeAmountPrecision(precision int) int {
+	if precision < MinAmountPrecision || precision > MaxAmountPrecision {
+		return DefaultAmountPrecision
+	}
+	return precision
+}
+
+func GetAmountPrecision() int {
+	return NormalizeAmountPrecision(GetSettingInt(mdb.SettingKeyAmountPrecision, DefaultAmountPrecision))
+}
+
 // SetSetting upserts a setting row and refreshes the cache entry.
 func SetSetting(group, key, value, valueType string) error {
 	if valueType == "" {

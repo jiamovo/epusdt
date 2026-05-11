@@ -30,6 +30,7 @@ const (
 	SettingKeyInitAdminPasswordFetched = "system.init_admin_password_fetched"
 	SettingKeyInitAdminPasswordChanged = "system.init_admin_password_changed"
 	SettingKeyOrderExpiration          = "system.order_expiration_time"
+	SettingKeyAmountPrecision          = "system.amount_precision"
 	SettingKeyBrandCheckoutName        = "brand.checkout_name"
 	SettingKeyBrandSiteName            = "brand.site_name"
 	SettingKeyBrandLogoUrl             = "brand.logo_url"

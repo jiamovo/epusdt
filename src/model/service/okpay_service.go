@@ -86,7 +86,7 @@ func createOkPayDepositOrder(uniqueID string, amount float64, coin string, retur
 	form := map[string]string{
 		"unique_id":    uniqueID,
 		"name":         uniqueID,
-		"amount":       fmt.Sprintf("%.2f", amount),
+		"amount":       fmt.Sprintf("%.*f", data.GetAmountPrecision(), amount),
 		"coin":         strings.ToUpper(strings.TrimSpace(coin)),
 		"callback_url": callbackURL,
 		"return_url":   returnURL,
@@ -254,8 +254,9 @@ func HandleOkPayNotify(form map[string]string, rawFormData string) error {
 	if err != nil {
 		return fmt.Errorf("invalid okpay amount: %w", err)
 	}
-	if fmt.Sprintf("%.2f", notifyAmount) != fmt.Sprintf("%.2f", order.ActualAmount) {
-		return fmt.Errorf("okpay amount mismatch: got=%.2f want=%.2f", notifyAmount, order.ActualAmount)
+	precision := data.GetAmountPrecision()
+	if fmt.Sprintf("%.*f", precision, notifyAmount) != fmt.Sprintf("%.*f", precision, order.ActualAmount) {
+		return fmt.Errorf("okpay amount mismatch: got=%.*f want=%.*f", precision, notifyAmount, precision, order.ActualAmount)
 	}
 
 	err = OrderProcessing(&request.OrderProcessingRequest{
