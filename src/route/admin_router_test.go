@@ -775,19 +775,21 @@ func TestAdminConfig_ExposesOkPayCredentials(t *testing.T) {
 func TestAdminSettings_UpsertBrandReflectsInConfig(t *testing.T) {
 	e, token := setupAdminTestEnv(t)
 
-	updateBrand := func(cashier, logo, title, support string) {
+	updateBrand := func(cashier, logo, title, support, bgColor, bgImage string) {
 		rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
 			"items": []map[string]interface{}{
 				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandCheckoutName, "value": cashier, "type": mdb.SettingTypeString},
 				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandLogoUrl, "value": logo, "type": mdb.SettingTypeString},
 				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandSiteTitle, "value": title, "type": mdb.SettingTypeString},
 				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandSupportUrl, "value": support, "type": mdb.SettingTypeString},
+				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandBackgroundColor, "value": bgColor, "type": mdb.SettingTypeString},
+				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandBackgroundImageUrl, "value": bgImage, "type": mdb.SettingTypeString},
 			},
 		}, token)
 		assertOK(t, rec)
 	}
 
-	assertSite := func(path, wantCashier, wantLogo, wantTitle, wantSupport string) {
+	assertSite := func(path, wantCashier, wantLogo, wantTitle, wantSupport, wantBgColor, wantBgImage string) {
 		rec := doGet(e, path)
 		if strings.HasPrefix(path, "/admin/") {
 			rec = doGetAdmin(e, path, token)
@@ -810,15 +812,21 @@ func TestAdminSettings_UpsertBrandReflectsInConfig(t *testing.T) {
 		if site["support_link"] != wantSupport {
 			t.Fatalf("%s support_link=%v, want %s", path, site["support_link"], wantSupport)
 		}
+		if site["background_color"] != wantBgColor {
+			t.Fatalf("%s background_color=%v, want %s", path, site["background_color"], wantBgColor)
+		}
+		if site["background_image_url"] != wantBgImage {
+			t.Fatalf("%s background_image_url=%v, want %s", path, site["background_image_url"], wantBgImage)
+		}
 	}
 
-	updateBrand("cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1")
-	assertSite("/payments/gmpay/v1/config", "cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1")
-	assertSite("/admin/api/v1/config", "cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1")
+	updateBrand("cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1", "#111111", "https://cdn.example.com/bg-v1.png")
+	assertSite("/payments/gmpay/v1/config", "cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1", "#111111", "https://cdn.example.com/bg-v1.png")
+	assertSite("/admin/api/v1/config", "cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1", "#111111", "https://cdn.example.com/bg-v1.png")
 
-	updateBrand("cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2")
-	assertSite("/payments/gmpay/v1/config", "cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2")
-	assertSite("/admin/api/v1/config", "cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2")
+	updateBrand("cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2", "#222222", "https://cdn.example.com/bg-v2.png")
+	assertSite("/payments/gmpay/v1/config", "cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2", "#222222", "https://cdn.example.com/bg-v2.png")
+	assertSite("/admin/api/v1/config", "cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2", "#222222", "https://cdn.example.com/bg-v2.png")
 }
 
 // ─── Notification Channels ───────────────────────────────────────────────────

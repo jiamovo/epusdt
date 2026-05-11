@@ -495,6 +495,12 @@ func TestGetPublicConfig(t *testing.T) {
 	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandSupportUrl, "https://example.com/support", mdb.SettingTypeString); err != nil {
 		t.Fatalf("seed brand.support_url: %v", err)
 	}
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandBackgroundColor, "#123456", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.background_color: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandBackgroundImageUrl, "https://cdn.example.com/bg.png", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.background_image_url: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/config", nil)
 	rec := httptest.NewRecorder()
@@ -535,6 +541,12 @@ func TestGetPublicConfig(t *testing.T) {
 	}
 	if site["support_link"] != "https://example.com/support" {
 		t.Fatalf("site.support_link = %v", site["support_link"])
+	}
+	if site["background_color"] != "#123456" {
+		t.Fatalf("site.background_color = %v, want #123456", site["background_color"])
+	}
+	if site["background_image_url"] != "https://cdn.example.com/bg.png" {
+		t.Fatalf("site.background_image_url = %v", site["background_image_url"])
 	}
 	epay, ok := respData["epay"].(map[string]interface{})
 	if !ok {

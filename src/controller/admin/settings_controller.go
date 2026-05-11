@@ -40,6 +40,8 @@ import (
 //     brand.site_title       (string) — payment page title / website title (preferred)
 //     brand.success_copy     (string) — text shown on payment success (preferred)
 //     brand.support_url      (string) — support / help URL
+//     brand.background_color (string) — checkout background color
+//     brand.background_image_url (string) — checkout background image URL
 //     brand.site_name        (string) — legacy cashier/site display name
 //     brand.page_title       (string) — legacy payment page title
 //     brand.pay_success_text (string) — legacy success text
@@ -88,7 +90,7 @@ func (c *BaseAdminController) ListSettings(ctx echo.Context) error {
 // @Description  epay group keys: epay.default_token (e.g. "usdt"), epay.default_currency (e.g. "cny"), epay.default_network (e.g. "tron").
 // @Description  okpay group keys: okpay.enabled, okpay.shop_id, okpay.shop_token, okpay.api_url, okpay.callback_url, okpay.return_url, okpay.timeout_seconds, okpay.allow_tokens.
 // @Description  rate group keys: rate.forced_usdt_rate (>0 overrides USDT/CNY; <=0 uses rate.api_url), rate.api_url, rate.adjust_percent, rate.okx_c2c_enabled.
-// @Description  brand group keys: brand.checkout_name, brand.logo_url, brand.site_title, brand.success_copy, brand.support_url. Legacy aliases brand.site_name, brand.page_title and brand.pay_success_text are also supported.
+// @Description  brand group keys: brand.checkout_name, brand.logo_url, brand.site_title, brand.success_copy, brand.support_url, brand.background_color, brand.background_image_url. Legacy aliases brand.site_name, brand.page_title and brand.pay_success_text are also supported.
 // @Description  system group keys: system.order_expiration_time.
 // @Tags         Admin Settings
 // @Security     AdminJWT

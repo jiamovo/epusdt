@@ -184,6 +184,14 @@ func GetBrandSupportURL() string {
 	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandSupportUrl, ""))
 }
 
+func GetBrandBackgroundColor() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandBackgroundColor, ""))
+}
+
+func GetBrandBackgroundImageURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandBackgroundImageUrl, ""))
+}
+
 // OkPay settings helpers keep the provider-specific defaults in one place so
 // business logic does not need to repeat raw settings keys.
 func GetOkPayEnabled() bool {

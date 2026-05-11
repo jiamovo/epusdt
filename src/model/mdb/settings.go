@@ -38,6 +38,8 @@ const (
 	SettingKeyBrandSuccessCopy         = "brand.success_copy"
 	SettingKeyBrandPaySuccess          = "brand.pay_success_text"
 	SettingKeyBrandSupportUrl          = "brand.support_url"
+	SettingKeyBrandBackgroundColor     = "brand.background_color"
+	SettingKeyBrandBackgroundImageUrl  = "brand.background_image_url"
 	SettingKeyRateForcedUsdt           = "rate.forced_usdt_rate"
 	SettingKeyRateAdjustPercent        = "rate.adjust_percent"
 	SettingKeyRateOkxC2cEnabled        = "rate.okx_c2c_enabled"
